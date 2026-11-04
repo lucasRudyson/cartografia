@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>body{margin:0}[hidden]{display:none!important}</style>
+<script>try{const t=localStorage.getItem('tema');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;}catch(e){}</script>
 <title>Mapa da Área</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400&display=swap">
@@ -95,6 +96,7 @@ aside h3{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(
       <button id="v3d" type="button" aria-pressed="true">3D</button>
       <button id="vtop" type="button" aria-pressed="false">Topo</button>
       <button id="vspin" type="button" aria-pressed="false" aria-label="Girar automaticamente">⟳</button>
+      <button id="vtema" type="button" hidden></button>
     </div>
     <div class="coord" id="coord"><span>clique no chão:</span> latitude, longitude</div>
     <div class="attr">Dados do mapa © colaboradores do OpenStreetMap</div>
@@ -217,27 +219,30 @@ const SEM_LOCAL=[
 
   if(!window.THREE||!THREE.OrbitControls){host.innerHTML='<div class="err">Não foi possível carregar o mapa 3D. Recarregue a página.</div>';return;}
 
-  const css=getComputedStyle(document.documentElement);
-  const C=k=>css.getPropertyValue('--'+k).trim();
+  // lê na hora: as cores mudam quando o tema troca
+  const C=k=>getComputedStyle(document.documentElement).getPropertyValue('--'+k).trim();
   const lin=c=>new THREE.Color(c).convertSRGBToLinear();
 
   // ===== textura do chão =====
   const R=1500, S=1.4, N=Math.round(2*R*S);
   const cv=document.createElement('canvas'); cv.width=cv.height=N;
   const g=cv.getContext('2d'); g.setTransform(S,0,0,S,R*S,R*S);
-  g.fillStyle=C('ground'); g.fillRect(-R,-R,2*R,2*R);
   const path=pts=>{g.beginPath();pts.forEach(([x,z],i)=>i?g.lineTo(x,z):g.moveTo(x,z));};
-  // mancha urbana suave em volta das construções
-  g.fillStyle=C('urban'); OSM.bld.forEach(([,p])=>{const c=p[0];g.beginPath();g.arc(c[0],c[1],38,0,7);g.fill();});
   const areaCol={wood:'wood',park:'park',grass:'park',pitch:'pitch',stadium:'pitch',swimming_pool:'water',industrial:'urban'};
-  OSM.areas.forEach(([k,,p])=>{g.fillStyle=C(areaCol[k]||'park');path(p);g.closePath();g.fill();});
-  OSM.water.forEach(([k,p])=>{if(k==='lake'){g.fillStyle=C('water');path(p);g.closePath();g.fill();}else{g.strokeStyle=C('water');g.lineWidth=14;g.lineCap='round';g.lineJoin='round';path(p);g.stroke();}});
   const W={secondary:10,tertiary:8,unclassified:6.5,residential:6.5,path:2.5};
-  g.lineCap='round'; g.lineJoin='round';
   const main=k=>k==='secondary'||k==='tertiary';
-  [['road-edge','road-main-edge',2.4],['road','road-main',0]].forEach(([c1,c2,extra])=>{
-    OSM.roads.forEach(([k,,p])=>{g.strokeStyle=C(main(k)?c2:c1);g.lineWidth=(W[k]||6)+extra;path(p);g.stroke();});
-  });
+  function paintGround(){
+    g.fillStyle=C('ground'); g.fillRect(-R,-R,2*R,2*R);
+    // mancha urbana suave em volta das construções
+    g.fillStyle=C('urban'); OSM.bld.forEach(([,p])=>{const c=p[0];g.beginPath();g.arc(c[0],c[1],38,0,7);g.fill();});
+    OSM.areas.forEach(([k,,p])=>{g.fillStyle=C(areaCol[k]||'park');path(p);g.closePath();g.fill();});
+    OSM.water.forEach(([k,p])=>{if(k==='lake'){g.fillStyle=C('water');path(p);g.closePath();g.fill();}else{g.strokeStyle=C('water');g.lineWidth=14;g.lineCap='round';g.lineJoin='round';path(p);g.stroke();}});
+    g.lineCap='round'; g.lineJoin='round';
+    [['road-edge','road-main-edge',2.4],['road','road-main',0]].forEach(([c1,c2,extra])=>{
+      OSM.roads.forEach(([k,,p])=>{g.strokeStyle=C(main(k)?c2:c1);g.lineWidth=(W[k]||6)+extra;path(p);g.stroke();});
+    });
+  }
+  paintGround();
 
   // ===== cena =====
   let renderer;try{renderer=new THREE.WebGLRenderer({antialias:true});}catch(e){host.innerHTML='<div class="err">Este navegador não conseguiu abrir o 3D (WebGL desativado). Tente no Chrome ou no Edge atualizados.</div>';return;}
@@ -333,6 +338,24 @@ const SEM_LOCAL=[
   bT.onclick=()=>{bT.setAttribute('aria-pressed','true');bV.setAttribute('aria-pressed','false');moveTo(HOME.t,[HOME.t[0],1250,HOME.t[2]+1]);};
   bS.onclick=()=>{controls.autoRotate=!controls.autoRotate;bS.setAttribute('aria-pressed',controls.autoRotate);};
   camera.position.set(...HOME.t.map((v,i)=>v+HOME.off[i])); controls.target.set(...HOME.t);
+
+  // ===== tema claro/escuro =====
+  // Sem escolha salva, segue o sistema; o botão grava a escolha (localStorage).
+  const bTema=document.getElementById('vtema'), mqDark=matchMedia('(prefers-color-scheme: dark)');
+  const escuro=()=>{const t=document.documentElement.dataset.theme;return t?t==='dark':mqDark.matches;};
+  function rotuloTema(){const d=escuro(); bTema.hidden=false; bTema.textContent=d?'☀':'☾'; bTema.title=d?'Usar tema claro':'Usar tema escuro'; bTema.setAttribute('aria-label',bTema.title);}
+  function applyTheme(){
+    scene.background=lin(C('bg')); scene.fog.color.copy(scene.background);
+    mB.color.copy(lin(C('bldg'))); mN.color.copy(lin(C('bldg-named'))); probe.material.color.copy(lin(C('accent')));
+    paintGround(); tex.needsUpdate=true; rotuloTema();
+  }
+  rotuloTema();
+  bTema.onclick=()=>{
+    const t=escuro()?'light':'dark'; document.documentElement.dataset.theme=t;
+    try{localStorage.setItem('tema',t);}catch(e){}
+    applyTheme();
+  };
+  mqDark.addEventListener('change',()=>{if(!document.documentElement.dataset.theme) applyTheme();});
 
   // ===== cliques e hover =====
   const ray=new THREE.Raycaster(), mouse=new THREE.Vector2(), coord=document.getElementById('coord');
