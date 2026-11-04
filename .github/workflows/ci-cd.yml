@@ -1,0 +1,77 @@
+# CI em todo push e PR. CD (deploy na VM por SSH) só na main, depois de o CI passar.
+# Segredos (Settings › Secrets and variables › Actions): VPS_HOST, VPS_USER, VPS_SSH_KEY,
+# VPS_KNOWN_HOSTS e, se não for a 22, VPS_PORT. Variável DEPLOY_ATIVO=true liga o deploy.
+# Ver README.md.
+name: CI/CD
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# Push novo no mesmo branch cancela o CI antigo; na main não (não interromper um deploy).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Compose de produção é válido
+        run: docker compose -p cartografia-prod -f docker-compose.prod.yml config --quiet
+      - name: Caddyfile é válido
+        run: docker run --rm -v "$PWD/caddy:/etc/caddy:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+      - name: shellcheck do deploy.sh
+        run: shellcheck scripts/deploy.sh
+      # Mesmo jeito da produção (Caddy + volumes), sem o Traefik.
+      - name: Site sobe e responde com os cabeçalhos
+        run: |
+          docker run -d --name site -p 8080:80 -v "$PWD/site:/srv:ro" -v "$PWD/caddy:/etc/caddy:ro" caddy:2-alpine
+          for i in $(seq 1 20); do curl -fsS -o /dev/null http://localhost:8080/ && break; sleep 1; done
+          curl -fsS http://localhost:8080/ | grep -q '<title>'
+          curl -fsSI http://localhost:8080/ | tee /dev/stderr | grep -qi '^content-security-policy:'
+
+  deploy:
+    needs: [site]
+    # Desligado até configurar os segredos: variável DEPLOY_ATIVO=true (ver README.md).
+    if: >-
+      vars.DEPLOY_ATIVO == 'true' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    environment:
+      name: producao
+      url: https://cartografia.rudyson.com.br
+    # Um deploy por vez, na ordem; nunca cancela um que já começou.
+    concurrency:
+      group: deploy-producao
+      cancel-in-progress: false
+    env:
+      SSH: ssh -i ~/.ssh/deploy -p ${{ secrets.VPS_PORT || '22' }} -o BatchMode=yes ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+    steps:
+      - name: Chave SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "${{ secrets.VPS_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      - name: Deploy na VM
+        # Funciona com a chave livre ou presa a scripts/deploy.sh (command= no authorized_keys):
+        # nesse caso o script pega o argumento da última palavra do comando.
+        run: $SSH "bash /opt/projetos/cartografia/scripts/deploy.sh ${{ github.sha }}"
+
+      - name: Conferir o site
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS -o /dev/null https://cartografia.rudyson.com.br/; then exit 0; fi
+            sleep 5
+          done
+          echo "O site não respondeu depois do deploy."
+          $SSH "bash /opt/projetos/cartografia/scripts/deploy.sh logs"
+          exit 1

@@ -1,0 +1,13 @@
+# Segredos (o site não usa nenhum, mas não deixa escapar)
+.env
+.env.*
+
+# Editor / SO
+.vscode/
+.idea/
+.DS_Store
+
+# Chaves privadas nunca vão para o git
+*.key
+*.pem
+.claude/settings.local.json

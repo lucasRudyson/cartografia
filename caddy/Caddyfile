@@ -1,0 +1,24 @@
+# Servidor interno (HTTP puro na 80; o TLS é do Traefik da VM).
+# O admin fica ligado (só dentro do container): o deploy.sh usa "caddy reload".
+{
+	auto_https off
+}
+
+:80 {
+	encode zstd gzip
+	root * /srv
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		X-Frame-Options DENY
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		# three.js vem do cdnjs/jsdelivr e as fontes do Google; o resto (dados, ícones em data:) é inline.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+		# Um arquivo só, editado direto: o navegador sempre revalida (ETag), sem servir versão velha.
+		Cache-Control "no-cache"
+		-Server
+	}
+
+	file_server
+}
