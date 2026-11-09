@@ -24,6 +24,8 @@ services:
       interval: 30s
       timeout: 5s
       start_period: 10s
+      # O Traefik não roteia para container "starting": checa a cada 2 s na subida.
+      start_interval: 2s
       retries: 3
     networks:
       - traefik-public
