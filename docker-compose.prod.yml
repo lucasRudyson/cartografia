@@ -5,11 +5,17 @@
 # preso na versão antiga.
 name: cartografia-prod
 
+# Rotação de logs: padrão da VPS (/opt/infra/README.md).
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "5" }
+
 services:
   web:
     image: caddy:2-alpine
     container_name: cartografia-prod-web
     restart: unless-stopped
+    logging: *logging
     volumes:
       - ./site:/srv:ro
       - ./caddy:/etc/caddy:ro
